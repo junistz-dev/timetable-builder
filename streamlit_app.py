@@ -1,56 +1,94 @@
 import streamlit as st
-from openai import OpenAI
+import openai
+import json
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+def generate_schedule(user_input):
+    """ChatGPT API를 호출하여 시간표를 생성"""
+    api_key = "YOUR_OPENAI_API_KEY"  # 여기에 OpenAI API 키 입력
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that generates optimized university timetables based on user preferences."},
+            {"role": "user", "content": f"Generate an optimized timetable based on the following input: {json.dumps(user_input)}"}
+        ]
+    )
+    return response["choices"][0]["message"]["content"]
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
-
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
-
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
-
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
-
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+def main():
+    st.title("Timetable Builder")
+    
+    # 캠퍼스 선택
+    campus = st.selectbox("당신의 캠퍼스는 어디입니까?", ["Malaysia", "Australia"])
+    
+    # 과목 개수 선택
+    num_subjects = st.number_input("당신은 몇 가지의 과목을 듣습니까?", min_value=1, max_value=5, step=1)
+    
+    subjects = []
+    for i in range(int(num_subjects)):
+        st.subheader(f"과목 {i+1}")
+        subject_name = st.text_input(f"과목 이름 {i+1}")
+        
+        forum_times = []
+        tutorial_times = []
+        
+        forum_count = st.number_input(f"Forum 개수 (1~10)", min_value=1, max_value=10, step=1, key=f"forum_count_{i}")
+        for j in range(int(forum_count)):
+            with st.expander(f"Forum {j+1}"):
+                day = st.selectbox(f"요일 {j+1}", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], key=f"forum_day_{i}_{j}")
+                start_time = st.time_input(f"시작 시간 {j+1}", key=f"forum_start_{i}_{j}")
+                end_time = st.time_input(f"종료 시간 {j+1}", key=f"forum_end_{i}_{j}")
+                forum_times.append({"day": day, "start": str(start_time), "end": str(end_time)})
+        
+        tutorial_count = st.number_input(f"Tutorial 개수 (1~10)", min_value=1, max_value=10, step=1, key=f"tutorial_count_{i}")
+        for j in range(int(tutorial_count)):
+            with st.expander(f"Tutorial {j+1}"):
+                day = st.selectbox(f"요일 {j+1}", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], key=f"tutorial_day_{i}_{j}")
+                start_time = st.time_input(f"시작 시간 {j+1}", key=f"tutorial_start_{i}_{j}")
+                end_time = st.time_input(f"종료 시간 {j+1}", key=f"tutorial_end_{i}_{j}")
+                tutorial_times.append({"day": day, "start": str(start_time), "end": str(end_time)})
+        
+        subjects.append({
+            "subject": subject_name,
+            "forum": forum_times,
+            "tutorial": tutorial_times
+        })
+    
+    # 시간표 최적화 방식 선택
+    schedule_type = st.radio("시간표 최적화 방식", [
+        "균형형 (Balanced)", "압축형 (Compact)", "아침형 (Morning Focus)", "저녁형 (Evening Focus)", "맞춤형 (Custom)"
+    ])
+    
+    # 특정 요일 및 시간 선호
+    include_weekend = st.checkbox("주말 포함 가능 여부")
+    free_day = st.multiselect("공강 요일 설정", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]) 
+    max_consecutive_classes = st.slider("최대 연강 개수 제한", 1, 5, 3)
+    
+    # 추가 옵션
+    more_free_days = st.checkbox("한 주에 최대한 몰아넣어 공강일을 늘리기")
+    extend_weekend = st.checkbox("주말과 이어붙여 연속된 휴일을 최대한 많이 만들기")
+    compress_classes = st.checkbox("최대한 연강 배치하여 하루에 몰아서 듣기")
+    minimize_breaks = st.checkbox("쉬는 시간 최소화 (수업 간 공백 시간 최소화)")
+    
+    user_input = {
+        "campus": campus,
+        "subjects": subjects,
+        "schedule_type": schedule_type,
+        "preferences": {
+            "include_weekend": include_weekend,
+            "free_day": free_day,
+            "max_consecutive_classes": max_consecutive_classes,
+            "more_free_days": more_free_days,
+            "extend_weekend": extend_weekend,
+            "compress_classes": compress_classes,
+            "minimize_breaks": minimize_breaks
+        }
+    }
+    
+    if st.button("시간표 생성 요청"): 
+        with st.spinner("시간표를 생성 중입니다..."):
+            generated_schedule = generate_schedule(user_input)
+            st.write("### 생성된 시간표")
+            st.write(generated_schedule)
+    
+if __name__ == "__main__":
+    main()
